@@ -1,0 +1,15 @@
+{
+  "python.defaultInterpreterPath": "${workspaceFolder}\\.venv\\Scripts\\python.exe",
+  "python.terminal.activateEnvironment": true,
+  "python.analysis.extraPaths": ["${workspaceFolder}\\src"],
+  "jupyter.notebookFileRoot": "${workspaceFolder}",
+  "terminal.integrated.env.windows": {
+    "PROJ_LIB": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\proj_data",
+    "PROJ_DATA": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\proj_data",
+    "GDAL_DATA": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\gdal_data"
+  },
+  "files.exclude": {
+    "**/__pycache__": true,
+    "**/.ipynb_checkpoints": true
+  }
+}

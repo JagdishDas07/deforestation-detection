@@ -1,0 +1,17 @@
+/data/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.tif
+*.tiff
+*.npy
+*.npz
+.pth
+results/*.html
+.venv/
+.env
+results/unet.pth
+run2.py
+run_cleared.py
+*.log
+*.err

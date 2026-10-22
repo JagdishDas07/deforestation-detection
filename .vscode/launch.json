@@ -1,0 +1,47 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Train (src/train.py)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}\\src\\train.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PROJ_LIB": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\proj_data",
+        "PROJ_DATA": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\proj_data",
+        "GDAL_DATA": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\gdal_data"
+      }
+    },
+    {
+      "name": "Evaluate (src/evaluate.py)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}\\src\\evaluate.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PROJ_LIB": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\proj_data",
+        "PROJ_DATA": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\proj_data",
+        "GDAL_DATA": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\gdal_data"
+      }
+    },
+    {
+      "name": "Prepare tiles (src/data/prepare_tiles.py)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}\\src\\data\\prepare_tiles.py",
+      "console": "integratedTerminal",
+      "cwd": "${workspaceFolder}",
+      "justMyCode": false,
+      "env": {
+        "PROJ_LIB": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\proj_data",
+        "PROJ_DATA": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\proj_data",
+        "GDAL_DATA": "${workspaceFolder}\\.venv\\Lib\\site-packages\\rasterio\\gdal_data"
+      }
+    }
+  ]
+}
