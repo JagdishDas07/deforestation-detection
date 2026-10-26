@@ -35,8 +35,9 @@ def render_table(rows):
     lines = ["| " + " | ".join(HEADERS) + " |",
              "|" + "|".join("---" for _ in HEADERS) + "|"]
     if not rows:
-        lines.append("| _no runs yet — run train.py / evaluate.py / pipeline.py_ "
-                     + "| " * (len(HEADERS) - 1) + "|")
+        cells = (["_no runs yet — run train.py / evaluate.py / pipeline.py_"]
+                 + [""] * (len(HEADERS) - 1))
+        lines.append("| " + " | ".join(cells) + " |")
     for r in rows:
         cells = [str(r.get("run_id", "")), str(r.get("seed", "")),
                  str(r.get("region", "")), str(r.get("model", "")),

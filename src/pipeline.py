@@ -16,7 +16,7 @@ import numpy as np
 import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from baseline.ndvi import compute_ndvi, ndvi_forest_mask  # noqa: E402
+from baseline.ndvi import ndvi_forest_mask  # noqa: E402
 from change_detection import detect_clearing  # noqa: E402
 from evaluate import append_metrics  # noqa: E402
 from geo import pixel_area_ha_for  # noqa: E402
@@ -27,10 +27,14 @@ RED_IDX, NIR_IDX = 2, 3
 
 
 def read_geotiff(path):
-    """Read a multi-band GeoTIFF -> (bands, H, W) float32."""
+    """Read a multi-band GeoTIFF -> (bands, H, W) float32.
+
+    Reads straight to float32 so a float64 source does not need a second
+    full-scene copy in memory (these scenes are ~1 GB each as float32).
+    """
     import rasterio
     with rasterio.open(path) as src:
-        return src.read().astype(np.float32)
+        return src.read(out_dtype="float32")
 
 
 def load_meta(path):
@@ -48,6 +52,13 @@ def scene_stats(image):
 def normalize(image, mean, std):
     """Apply the same whole-scene normalization used during training."""
     return (image - mean[:, None, None]) / std[:, None, None]
+
+
+def normalize_inplace(image, mean, std):
+    """Normalize a scene in place to avoid a second full-scene allocation."""
+    image -= mean[:, None, None]
+    image /= std[:, None, None]
+    return image
 
 
 def baseline_forest(b4, b8, threshold=0.6):
@@ -83,7 +94,7 @@ def synthetic_pair(size=512, seed=0):
         return b4, b8
 
     def stack(b4, b8):
-        return np.stack([b4 * 0.5, b4, b4, b8, b8 * 0.6, b8 * 0.4])
+        return np.stack([b4 * 0.5, b4, b4, b8, b8 * 0.6, b8 * 0.4]).astype(np.float32)
 
     b4a, b8a = bands()
     b4b, b8b = bands()
@@ -128,11 +139,28 @@ def main():
     args = p.parse_args()
 
     if args.t1 and args.t2:
-        t1, t2 = read_geotiff(args.t1), read_geotiff(args.t2)
+        def load_t1():
+            return read_geotiff(args.t1)
+
+        def load_t2():
+            return read_geotiff(args.t2)
+        default_area = pixel_area_ha_for(args.t1)
     elif args.demo:
-        t1, t2 = synthetic_pair()
+        demo_t1, demo_t2 = synthetic_pair()
+
+        def load_t1():
+            return demo_t1
+
+        def load_t2():
+            return demo_t2
+        default_area = 0.01
     elif args.data_dir:
-        t1, t2 = load_pair(args.data_dir)
+        def load_t1():
+            return np.asarray(np.load(Path(args.data_dir) / "t1.npy"), np.float32)
+
+        def load_t2():
+            return np.asarray(np.load(Path(args.data_dir) / "t2.npy"), np.float32)
+        default_area = 0.01
     else:
         raise SystemExit("Provide --t1/--t2 GeoTIFFs, --data-dir, or use --demo")
 
@@ -140,16 +168,13 @@ def main():
 
     pixel_area_ha = args.pixel_area_ha
     if pixel_area_ha is None:
-        pixel_area_ha = pixel_area_ha_for(args.t1) if args.t1 else 0.01
+        pixel_area_ha = default_area
     print(f"pixel area: {pixel_area_ha:.6f} ha/px"
           f"{'' if args.pixel_area_ha is None else ' (overridden)'}")
 
-    cleared, hectares = report(
-        "baseline",
-        baseline_forest(t1[RED_IDX], t1[NIR_IDX], args.ndvi_threshold),
-        baseline_forest(t2[RED_IDX], t2[NIR_IDX], args.ndvi_threshold),
-        args.min_pixels, pixel_area_ha)
-
+    weights = mean = std = None
+    model = None
+    norm_src = ""
     if args.unet:
         weights = None if args.encoder_weights.lower() in ("none", "") else args.encoder_weights
         model = build_unet(in_channels=args.in_channels, encoder_weights=weights)
@@ -157,16 +182,35 @@ def main():
             model.load_state_dict(torch.load(args.checkpoint, map_location="cpu"))
         if args.meta:
             mean, std = load_meta(args.meta)
-            src = args.meta
+            norm_src = args.meta
         else:
-            mean, std = scene_stats(t1)
-            src = "scene stats (pass --meta for training-matched normalization)"
-        print(f"\nU-Net (channels {args.in_channels}->1, enc={weights}, norm from {src})")
+            norm_src = "scene stats (pass --meta for training-matched normalization)"
+
+    # Load one date at a time: both full scenes plus their normalized copies do
+    # not fit in memory on a typical laptop. Keep only the binary masks.
+    t1 = load_t1()
+    if model is not None and mean is None:
+        mean, std = scene_stats(t1)
+    before_base = baseline_forest(t1[RED_IDX], t1[NIR_IDX], args.ndvi_threshold)
+    before_unet = None
+    if model is not None:
+        before_unet = unet_forest(model, normalize_inplace(t1, mean, std))
+    del t1
+
+    t2 = load_t2()
+    after_base = baseline_forest(t2[RED_IDX], t2[NIR_IDX], args.ndvi_threshold)
+    after_unet = None
+    if model is not None:
+        after_unet = unet_forest(model, normalize_inplace(t2, mean, std))
+    del t2
+
+    cleared, hectares = report(
+        "baseline", before_base, after_base, args.min_pixels, pixel_area_ha)
+
+    if model is not None:
+        print(f"\nU-Net (channels {args.in_channels}->1, enc={weights}, norm from {norm_src})")
         cleared, hectares = report(
-            "unet",
-            unet_forest(model, normalize(t1, mean, std)),
-            unet_forest(model, normalize(t2, mean, std)),
-            args.min_pixels, pixel_area_ha)
+            "unet", before_unet, after_unet, args.min_pixels, pixel_area_ha)
 
     print(f"\nNewly cleared forest: {hectares:.2f} ha "
           f"({int(cleared.sum())} px, >= {args.min_pixels} px per patch)")
@@ -189,7 +233,7 @@ def main():
             "run_id": time.strftime("%Y%m%d-%H%M%S"),
             "region": args.region,
             "model": "unet+change" if args.unet else "ndvi+change",
-            "split": "",
+            "split": "change",
             "hectares_cleared": round(hectares, 2),
         })
         print(f"logged run -> {args.metrics}")

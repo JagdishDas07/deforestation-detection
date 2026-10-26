@@ -13,6 +13,7 @@ from geo import pixel_area_ha_for  # noqa: E402
 
 # band order in the exported composite: B2, B3, B4, B8, B11, B12
 RGB_IDX = (2, 1, 0)  # red, green, blue
+RGB_BANDS = tuple(i + 1 for i in RGB_IDX)  # rasterio band numbers are 1-based
 
 
 def build_clearing_map(center_lat, center_lon, cleared_geojson, zoom=10):
@@ -35,15 +36,16 @@ def mask_to_geojson(mask, transform):
     return {"type": "FeatureCollection", "features": feats}
 
 
-def rgb_from_bands(image, scale=(0, 3000), max_dim=2048):
+def rgb_from_bands(image, scale=(0, 3000), max_dim=2048, indices=RGB_IDX):
     """(bands, H, W) -> uint8 (H, W, 3) RGB for display.
 
     Downsampled to `max_dim` on the longest side so the overlay inlined in the
-    HTML stays a few MB instead of ~100 MB; NaN reflectance becomes 0.
+    HTML stays a few MB instead of ~100 MB; non-finite reflectance becomes
+    nodata black.
     """
     step = max(1, -(-max(image.shape[1:]) // max_dim))
-    rgb = np.transpose(image[list(RGB_IDX), ::step, ::step], (1, 2, 0)).astype(float)
-    rgb = np.nan_to_num(rgb, nan=scale[0])
+    rgb = np.transpose(image[list(indices), ::step, ::step], (1, 2, 0)).astype(np.float32)
+    rgb = np.nan_to_num(rgb, nan=scale[0], posinf=scale[1], neginf=scale[0])
     rgb = np.clip((rgb - scale[0]) / (scale[1] - scale[0]), 0, 1)
     return (rgb * 255).astype("uint8")
 
@@ -63,10 +65,13 @@ def legend_html(hectares, pixels, pixel_area_ha=0.01, color="red"):
 
 
 def build_map(t1_path, t2_path, cleared_mask, out_html, zoom=12, pixel_area_ha=None):
+    # Only the RGB bands are needed for the basemap; reading all six at full
+    # resolution wastes ~2/3 of the memory for a 600 MB GeoTIFF.
     with rasterio.open(t1_path) as src:
-        t1, transform, bounds = src.read().astype(np.float32), src.transform, src.bounds
+        t1 = src.read(RGB_BANDS, out_dtype="float32")
+        transform, bounds = src.transform, src.bounds
     with rasterio.open(t2_path) as src:
-        t2 = src.read().astype(np.float32)
+        t2 = src.read(RGB_BANDS, out_dtype="float32")
 
     if pixel_area_ha is None:
         pixel_area_ha = pixel_area_ha_for(t1_path)
@@ -75,8 +80,10 @@ def build_map(t1_path, t2_path, cleared_mask, out_html, zoom=12, pixel_area_ha=N
     extent = [[bounds.bottom, bounds.left], [bounds.top, bounds.right]]
 
     m = folium.Map(location=center, zoom_start=zoom)
-    folium.raster_layers.ImageOverlay(rgb_from_bands(t1), bounds=extent, name="date 1").add_to(m)
-    folium.raster_layers.ImageOverlay(rgb_from_bands(t2), bounds=extent, name="date 2").add_to(m)
+    folium.raster_layers.ImageOverlay(
+        rgb_from_bands(t1, indices=(0, 1, 2)), bounds=extent, name="date 1").add_to(m)
+    folium.raster_layers.ImageOverlay(
+        rgb_from_bands(t2, indices=(0, 1, 2)), bounds=extent, name="date 2").add_to(m)
     folium.GeoJson(
         mask_to_geojson(cleared_mask, transform),
         style_function=lambda x: {"fillColor": "red", "color": "red", "weight": 1, "fillOpacity": 0.5},

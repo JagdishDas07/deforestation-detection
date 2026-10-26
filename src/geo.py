@@ -9,13 +9,21 @@ def pixel_area_ha(src):
     latitude spacing is fixed, but the longitude spacing shrinks with
     cos(latitude). At these latitudes a flat 0.01 ha per pixel overstates the
     real area by ~1.5%.
+
+    Handles both geographic (degree) and projected (metre) rasters, and uses
+    the full transform determinant so rotated/sheared grids are measured
+    correctly instead of assuming an axis-aligned square pixel.
     """
-    res_x = abs(src.transform.a)   # degrees of longitude per pixel
-    res_y = abs(src.transform.e)   # degrees of latitude per pixel
-    lat = (src.bounds.top + src.bounds.bottom) / 2
-    m_lat = 111132.92
-    m_lon = 111319.49 * math.cos(math.radians(lat))
-    return (res_x * m_lon) * (res_y * m_lat) / 10000.0
+    t = src.transform
+    det = abs(t.a * t.e - t.b * t.d)  # pixel area in CRS units^2
+    if src.crs is not None and src.crs.is_geographic:
+        lat = (src.bounds.top + src.bounds.bottom) / 2
+        m_lat = 111132.92
+        m_lon = 111319.49 * math.cos(math.radians(lat))
+        area_m2 = det * m_lon * m_lat
+    else:
+        area_m2 = det  # projected CRS: units are already metres
+    return area_m2 / 10000.0
 
 
 def pixel_area_ha_for(path):

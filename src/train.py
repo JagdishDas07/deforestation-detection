@@ -101,7 +101,11 @@ def validate(model, loader, device):
 
 
 def collect_tiles(root, split):
-    """Locate tiles for a split: {root}/split.json listing files, or a subdir."""
+    """Locate tiles for a split: {root}/split.json listing files, or a subdir.
+
+    A flat directory of .npz files only counts as the training set; returning it
+    for val/test too would silently evaluate on the training data (leakage).
+    """
     root = Path(root)
     manifest = root / "split.json"
     if manifest.exists():
@@ -110,7 +114,9 @@ def collect_tiles(root, split):
     sub = root / split
     if sub.is_dir():
         return sorted(str(p) for p in sub.rglob("*.npz"))
-    return sorted(str(p) for p in root.glob("*.npz"))
+    if split == "train":
+        return sorted(str(p) for p in root.glob("*.npz"))
+    return []
 
 
 def main():
