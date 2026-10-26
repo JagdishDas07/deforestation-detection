@@ -1,4 +1,4 @@
-run_id,seed,region,model,iou,f1,baseline_iou,hectares_cleared
-20261019-092338,42,"Colniza, MT",unet-resnet34,0.955,0.9769,,
-20261019-092853,42,"Colniza, MT",unet-resnet34,0.9432,0.9694,0.8887,
-20261019-093406,,"Colniza, MT",unet+change,,,,13993.24
+run_id,seed,region,model,split,iou,f1,baseline_iou,hectares_cleared
+20261022-102916,42,"Colniza, MT",unet-resnet34,val,0.955,0.9769,,
+20261022-103001,42,"Colniza, MT",unet-resnet34,test,0.9432,0.9694,0.8559,
+20261022-103224,,"Colniza, MT",unet+change,,,,,13778.2

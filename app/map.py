@@ -1,11 +1,15 @@
 """Render before/after imagery with cleared areas in red on an interactive map."""
 import argparse
+import sys
 from pathlib import Path
 
 import folium
 import numpy as np
 import rasterio
 from rasterio.features import shapes
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+from geo import pixel_area_ha_for  # noqa: E402
 
 # band order in the exported composite: B2, B3, B4, B8, B11, B12
 RGB_IDX = (2, 1, 0)  # red, green, blue
@@ -44,8 +48,9 @@ def rgb_from_bands(image, scale=(0, 3000), max_dim=2048):
     return (rgb * 255).astype("uint8")
 
 
-def legend_html(hectares, pixels, color="red"):
+def legend_html(hectares, pixels, pixel_area_ha=0.01, color="red"):
     """Floating box showing the total cleared-hectares figure."""
+    side_m = (pixel_area_ha * 10000) ** 0.5
     return (
         '<div style="position: fixed; bottom: 30px; left: 30px; z-index: 9999;'
         ' background: rgba(255,255,255,0.92); padding: 10px 14px; border: 2px solid #444;'
@@ -53,15 +58,18 @@ def legend_html(hectares, pixels, color="red"):
         '<b>Newly cleared forest</b><br>'
         f'<span style="display:inline-block;width:12px;height:12px;background:{color};'
         'margin-right:6px;"></span>forest &rarr; non-forest<br>'
-        f'<b>{hectares:,.1f} ha</b> ({pixels:,} px @ 10&nbsp;m)</div>'
+        f'<b>{hectares:,.1f} ha</b> ({pixels:,} px @ {side_m:.1f}&nbsp;m)</div>'
     )
 
 
-def build_map(t1_path, t2_path, cleared_mask, out_html, zoom=12, pixel_area_ha=0.01):
+def build_map(t1_path, t2_path, cleared_mask, out_html, zoom=12, pixel_area_ha=None):
     with rasterio.open(t1_path) as src:
         t1, transform, bounds = src.read().astype(np.float32), src.transform, src.bounds
     with rasterio.open(t2_path) as src:
         t2 = src.read().astype(np.float32)
+
+    if pixel_area_ha is None:
+        pixel_area_ha = pixel_area_ha_for(t1_path)
 
     center = [(bounds.bottom + bounds.top) / 2, (bounds.left + bounds.right) / 2]
     extent = [[bounds.bottom, bounds.left], [bounds.top, bounds.right]]
@@ -77,7 +85,8 @@ def build_map(t1_path, t2_path, cleared_mask, out_html, zoom=12, pixel_area_ha=0
     folium.LayerControl().add_to(m)
 
     pixels = int(np.asarray(cleared_mask).sum())
-    m.get_root().html.add_child(folium.Element(legend_html(pixels * pixel_area_ha, pixels)))
+    m.get_root().html.add_child(folium.Element(
+        legend_html(pixels * pixel_area_ha, pixels, pixel_area_ha)))
 
     Path(out_html).parent.mkdir(parents=True, exist_ok=True)
     m.save(out_html)
@@ -91,12 +100,17 @@ def main():
     p.add_argument("--cleared", required=True, help="cleared mask .npy (bool/uint8)")
     p.add_argument("--out", default="results/clearing_map.html")
     p.add_argument("--zoom", type=int, default=12)
-    p.add_argument("--pixel-area-ha", type=float, default=0.01)
+    p.add_argument("--pixel-area-ha", type=float, default=None,
+                   help="hectares per pixel (default: computed from the raster's resolution)")
     args = p.parse_args()
 
     cleared = np.load(args.cleared).astype(bool)
-    path = build_map(args.t1, args.t2, cleared, args.out, args.zoom, args.pixel_area_ha)
-    print(f"wrote {path}  ({int(cleared.sum())} cleared px = {cleared.sum() * args.pixel_area_ha:.2f} ha)")
+    pixel_area_ha = args.pixel_area_ha
+    if pixel_area_ha is None:
+        pixel_area_ha = pixel_area_ha_for(args.t1)
+    path = build_map(args.t1, args.t2, cleared, args.out, args.zoom, pixel_area_ha)
+    print(f"wrote {path}  ({int(cleared.sum())} cleared px = "
+          f"{cleared.sum() * pixel_area_ha:.2f} ha, {pixel_area_ha:.6f} ha/px)")
 
 
 if __name__ == "__main__":

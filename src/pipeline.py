@@ -19,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from baseline.ndvi import compute_ndvi, ndvi_forest_mask  # noqa: E402
 from change_detection import detect_clearing  # noqa: E402
 from evaluate import append_metrics  # noqa: E402
+from geo import pixel_area_ha_for  # noqa: E402
 from models.unet import build_unet  # noqa: E402
 
 # band order used throughout: B2, B3, B4(red), B8(NIR), B11, B12
@@ -116,8 +117,9 @@ def main():
     p.add_argument("--encoder-weights", default="imagenet")
     p.add_argument("--in-channels", type=int, default=6)
     p.add_argument("--ndvi-threshold", type=float, default=0.6)
-    p.add_argument("--min-pixels", type=int, default=50, help="50 px = 0.5 ha at 10 m")
-    p.add_argument("--pixel-area-ha", type=float, default=0.01)
+    p.add_argument("--min-pixels", type=int, default=50, help="50 px = ~0.5 ha at 10 m")
+    p.add_argument("--pixel-area-ha", type=float, default=None,
+                   help="hectares per pixel (default: computed from the raster's resolution)")
     p.add_argument("--save-mask", default=None, help="write the cleared mask to this .npy")
     p.add_argument("--map", dest="map_html", default=None, help="render before/after + cleared map to this HTML")
     p.add_argument("--zoom", type=int, default=12)
@@ -135,11 +137,18 @@ def main():
         raise SystemExit("Provide --t1/--t2 GeoTIFFs, --data-dir, or use --demo")
 
     print(f"NDVI baseline (threshold {args.ndvi_threshold}, min patch {args.min_pixels} px)")
+
+    pixel_area_ha = args.pixel_area_ha
+    if pixel_area_ha is None:
+        pixel_area_ha = pixel_area_ha_for(args.t1) if args.t1 else 0.01
+    print(f"pixel area: {pixel_area_ha:.6f} ha/px"
+          f"{'' if args.pixel_area_ha is None else ' (overridden)'}")
+
     cleared, hectares = report(
         "baseline",
         baseline_forest(t1[RED_IDX], t1[NIR_IDX], args.ndvi_threshold),
         baseline_forest(t2[RED_IDX], t2[NIR_IDX], args.ndvi_threshold),
-        args.min_pixels, args.pixel_area_ha)
+        args.min_pixels, pixel_area_ha)
 
     if args.unet:
         weights = None if args.encoder_weights.lower() in ("none", "") else args.encoder_weights
@@ -157,7 +166,7 @@ def main():
             "unet",
             unet_forest(model, normalize(t1, mean, std)),
             unet_forest(model, normalize(t2, mean, std)),
-            args.min_pixels, args.pixel_area_ha)
+            args.min_pixels, pixel_area_ha)
 
     print(f"\nNewly cleared forest: {hectares:.2f} ha "
           f"({int(cleared.sum())} px, >= {args.min_pixels} px per patch)")
@@ -172,7 +181,7 @@ def main():
             raise SystemExit("--map requires --t1/--t2 GeoTIFFs for the before/after base layers")
         sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
         from app.map import build_map
-        build_map(args.t1, args.t2, cleared, args.map_html, args.zoom, args.pixel_area_ha)
+        build_map(args.t1, args.t2, cleared, args.map_html, args.zoom, pixel_area_ha)
         print(f"saved cleared-area map -> {args.map_html}")
 
     if args.metrics:
@@ -180,6 +189,7 @@ def main():
             "run_id": time.strftime("%Y%m%d-%H%M%S"),
             "region": args.region,
             "model": "unet+change" if args.unet else "ndvi+change",
+            "split": "",
             "hectares_cleared": round(hectares, 2),
         })
         print(f"logged run -> {args.metrics}")

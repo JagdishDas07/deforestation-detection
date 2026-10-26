@@ -5,6 +5,7 @@ debugging, and logs one row per run to results/metrics.csv.
 """
 import argparse
 import csv
+import json
 import sys
 import time
 from pathlib import Path
@@ -17,7 +18,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from baseline.ndvi import ndvi_forest_mask  # noqa: E402
 from models.unet import build_unet  # noqa: E402
 
-CSV_FIELDS = ["run_id", "seed", "region", "model", "iou", "f1",
+CSV_FIELDS = ["run_id", "seed", "region", "model", "split", "iou", "f1",
               "baseline_iou", "hectares_cleared"]
 
 
@@ -136,18 +137,42 @@ def write_per_tile_csv(per_tile, out_path):
     return path
 
 
-def ndvi_baseline(dataset, red_idx=2, nir_idx=3, threshold=0.6, batch_size=8):
+def load_band_stats(data_dir):
+    """Per-band mean/std the tiles were normalized with (from meta.json).
+
+    Returns None when there is no meta.json next to the tiles, in which case
+    the tiles are assumed to hold raw reflectance already.
+    """
+    meta = Path(data_dir) / "meta.json"
+    if not meta.exists():
+        return None
+    data = json.loads(meta.read_text())
+    return (np.array(data["band_mean"], np.float32),
+            np.array(data["band_std"], np.float32))
+
+
+def ndvi_baseline(dataset, red_idx=2, nir_idx=3, threshold=0.6, batch_size=8,
+                  stats=None):
     """Mean per-tile IoU of the NDVI threshold baseline on the same tiles.
 
-    Note: pass raw (unnormalized) tiles here; running NDVI on per-tile
-    normalized bands is not physically meaningful.
+    The tiles hold normalized bands, so they are converted back to reflectance
+    before NDVI is computed — NDVI on z-scored bands is not physically
+    meaningful. `stats` is the (mean, std) pair from meta.json; when it is
+    None the tiles are assumed to hold raw reflectance already.
+
+    Scored the same way as the model (mean of per-tile IoU), so the two
+    numbers in the results table are directly comparable.
     """
+    mean, std = stats if stats else (None, None)
     loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     ious = []
     for img, mask in loader:
         for b in range(img.size(0)):
             red = img[b, red_idx].numpy()
             nir = img[b, nir_idx].numpy()
+            if mean is not None:
+                red = red * std[red_idx] + mean[red_idx]
+                nir = nir * std[nir_idx] + mean[nir_idx]
             true = mask[b, 0].numpy().astype(bool)
             iou, _ = pixel_metrics(ndvi_forest_mask(red, nir, threshold), true)
             ious.append(iou)
@@ -206,8 +231,11 @@ def main():
     if args.baseline_iou is not None:
         baseline = args.baseline_iou
     else:
+        stats = load_band_stats(args.data_dir)
+        if stats is None:
+            print("note: no meta.json found — assuming the tiles hold raw reflectance")
         baseline = ndvi_baseline(dataset, args.red_idx, args.nir_idx,
-                                 args.baseline_threshold, args.batch_size)
+                                 args.baseline_threshold, args.batch_size, stats)
 
     print(f"{args.split} tiles: {len(dataset)}")
     print(f"U-Net   IoU {result['iou']:.4f}  F1 {result['f1']:.4f}")
@@ -230,6 +258,7 @@ def main():
         "seed": args.seed,
         "region": args.region,
         "model": f"unet-{args.encoder}",
+        "split": args.split,
         "iou": round(result["iou"], 4),
         "f1": round(result["f1"], 4),
         "baseline_iou": round(baseline, 4),

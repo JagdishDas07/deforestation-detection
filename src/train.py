@@ -178,6 +178,7 @@ def main():
             "seed": args.seed,
             "region": args.region,
             "model": f"unet-{args.encoder}",
+            "split": "val",
             "iou": round(best_iou, 4),
             "f1": round(best_f1, 4),
         })

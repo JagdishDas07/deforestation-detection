@@ -10,9 +10,9 @@ from pathlib import Path
 MARK_START = "<!-- results:start -->"
 MARK_END = "<!-- results:end -->"
 
-COLUMNS = ["run_id", "seed", "region", "model", "iou", "f1",
+COLUMNS = ["run_id", "seed", "region", "model", "split", "iou", "f1",
            "baseline_iou", "hectares_cleared"]
-HEADERS = ["Run", "Seed", "Region", "Model", "IoU", "F1",
+HEADERS = ["Run", "Seed", "Region", "Model", "Split", "IoU", "F1",
            "IoU (NDVI)", "Hectares cleared"]
 
 
@@ -40,6 +40,7 @@ def render_table(rows):
     for r in rows:
         cells = [str(r.get("run_id", "")), str(r.get("seed", "")),
                  str(r.get("region", "")), str(r.get("model", "")),
+                 str(r.get("split", "")),
                  _fmt(r, "iou"), _fmt(r, "f1"), _fmt(r, "baseline_iou"),
                  str(r.get("hectares_cleared", ""))]
         lines.append("| " + " | ".join(cells) + " |")
